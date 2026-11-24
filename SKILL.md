@@ -73,7 +73,7 @@ bash <skill>/scripts/ue_run.sh "C:/path/Project.uproject" "C:/path/job.json"
 PY="C:/Program Files/Epic Games/UE_5.8/Engine/Binaries/ThirdParty/Python3/Win64/python.exe"
 "$PY" -I scripts/vfx_tex.py info  pack/smoke_01.png              # where is the shape: alpha or RGB?
 "$PY" -I scripts/vfx_tex.py pack  tex/smoke_atlas.png pack/smoke_0[1-8].png --cols 4 --cell 256
-"$PY" -I scripts/vfx_tex.py shape glow tex/glow.png              # also: ring | spark | noise
+"$PY" -I scripts/vfx_tex.py shape glow tex/glow.png              # also: ring | spark | noise | band
 ```
 
 - **The shape must be in alpha** for the sprite materials. Art on a black background has it in

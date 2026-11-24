@@ -9,9 +9,10 @@ Commands
         bottom, which is the order Niagara's SubImageIndex counts in. --cell downscales each
         input to PX (integer factors only). --luma-alpha replaces alpha with brightness, for
         art drawn on a black background. Prints the grid to put in the renderer's SubImageSize.
-  shape KIND OUT.png [--size N]       generate a starter texture: glow | ring | spark | noise
+  shape KIND OUT.png [--size N]       generate a starter texture: glow | ring | spark | noise | band
         glow/ring/spark are white with the shape in alpha (sprites). noise is tiling greyscale
-        in RGB (import it as kind "tile" and scroll it in a panner material).
+        in RGB (import it as kind "tile" and scroll it in a panner material). band is a soft
+        line across V in RGB, the Mask for ribbons and beams.
 
 Reads 8-bit non-interlaced PNG (grey, grey+alpha, RGB, RGBA, palette). Writes 8-bit RGBA.
 """
@@ -225,6 +226,12 @@ def cmd_shape(args):
                 c = max(0, min(255, int((val - 0.2) / 0.6 * 255)))
                 px[i:i + 4] = bytes((c, c, c, 255))
                 continue
+            if kind == "band":              # ribbon / beam mask: bright core line across V, soft falloff
+                d = abs(v)
+                val = min(1.0, math.exp(-(d / 0.16) ** 2) + 0.45 * max(0.0, 1 - d) ** 2)
+                c = int(val * 255)
+                px[i:i + 4] = bytes((c, c, c, 255))
+                continue
             if kind == "glow":
                 a = max(0.0, 1 - r) ** 2.2
             elif kind == "ring":
@@ -232,7 +239,7 @@ def cmd_shape(args):
             elif kind == "spark":           # horizontal streak: long in U, thin in V, hot centre
                 a = max(0.0, 1 - abs(u)) ** 1.5 * max(0.0, 1 - abs(v) / 0.12) ** 2
             else:
-                raise SystemExit("shape: unknown kind %s (glow | ring | spark | noise)" % kind)
+                raise SystemExit("shape: unknown kind %s (glow | ring | spark | noise | band)" % kind)
             px[i:i + 4] = bytes((255, 255, 255, max(0, min(255, int(a * 255)))))
     write_png(out, size, size, px)
     print("%s  %dx%d  %s" % (out, size, size, kind))

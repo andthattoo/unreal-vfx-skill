@@ -428,7 +428,8 @@ def kind_of(type_ref):
     if leaf in table:
         return table[leaf]
     if type_ref.startswith("/Script/"):
-        return None
+        # Native enums (ENiagaraCoordinateSpace) live under /Script too; structs do not start with E + capital.
+        return "enum" if len(leaf) > 1 and leaf[0] == "E" and leaf[1].isupper() else None
     return "enum"
 
 
@@ -556,7 +557,14 @@ class Stack:
                     names = [actual]
                     type_ref = self._topo[(script, module)][actual]
             if type_ref is None:
-                known = sorted(self._topo.get((script, module), {})) if len(names) == 1 else []
+                if len(names) == 1:
+                    known = sorted(self._topo.get((script, module), {}))
+                else:
+                    chain = tool("GetDynamicInputChain", {"stackInputRef": ref(
+                        self.system, self.emitter, script, module, inputs=names[:-1])}, what=where) or {}
+                    known = ["%s (%s)" % (c["value"].get("name"), c["value"].get("type", {}).get(
+                        "classStructOrEnum", {}).get("refPath", "?").rsplit(".", 1)[-1])
+                        for c in (chain.get("value") or {}).get("inputs", [])]
                 err("%s: no such input%s" % (where, (". Inputs: " + ", ".join(known)) if known else ""))
                 return
             kind = kind_of(type_ref)
@@ -867,17 +875,66 @@ BUILT = []
 USER_NAMES = set()
 
 
-def check_system(system):
-    """Ask Niagara for compile state and stack issues. Needs the full editor (ue_run.sh), not a commandlet."""
-    state = tool("GetSystemCompileState", {"system": {"refPath": system}}, what=system)
-    if state is None:
-        return
+def decode(res):
+    raw = res.get_value_as_json_string()
+    val = json.loads(raw) if raw else {}
+    if isinstance(val, str):
+        val = json.loads(val) if val else {}
+    return val.get("returnValue", val) if isinstance(val, dict) else {}
+
+
+class Checker:
+    """Compile-state and stack-issue checks, polled from the editor tick.
+
+    Both tools wait for any in-flight compile, so their results are often not ready when the
+    call returns. Start them, then let the editor tick until they complete.
+    """
+
+    def __init__(self, systems, on_finished, timeout=120.0):
+        self.on_finished = on_finished
+        self.left = timeout
+        self.jobs = []
+        for system in systems:
+            trace("check " + system)
+            payload = json.dumps({"system": {"refPath": system}})
+            self.jobs.append({"system": system,
+                              "state": unreal.ToolsetRegistry.execute_tool(SYS, "GetSystemCompileState", payload),
+                              "issues": None, "payload": payload})
+        self.handle = unreal.register_slate_post_tick_callback(self.tick)
+
+    def tick(self, dt):
+        self.left -= dt
+        waiting = False
+        for job in self.jobs:
+            if job["issues"] is None:
+                if job["state"].is_complete or job["state"].error:
+                    job["issues"] = unreal.ToolsetRegistry.execute_tool(SYS, "GetStackIssues", job["payload"])
+                waiting = True
+            elif not (job["issues"].is_complete or job["issues"].error):
+                waiting = True
+        if waiting and self.left > 0:
+            return
+        unreal.unregister_slate_post_tick_callback(self.handle)
+        for job in self.jobs:
+            state_res, issues_res = job["state"], job["issues"]
+            if state_res.error or not state_res.is_complete:
+                err("%s: compile state unavailable: %s" % (job["system"], state_res.error or "timed out"))
+                continue
+            if issues_res is None or issues_res.error or not issues_res.is_complete:
+                err("%s: stack issues unavailable: %s" % (job["system"], (issues_res.error if issues_res else "") or "timed out"))
+                issues = {}
+            else:
+                issues = decode(issues_res)
+            report_check(job["system"], decode(state_res), issues)
+        self.on_finished()
+
+
+def report_check(system, state, issues):
     if state.get("bHasErrors") or state.get("aggregateStatus") not in ("UpToDate", "UpToDateWithWarnings"):
         for sc in state.get("scripts", []):
             if sc.get("errorSummary") or sc.get("lastCompileStatus") not in ("UpToDate", "UpToDateWithWarnings"):
                 err("%s compile: %s %s: %s %s" % (system, sc.get("emitterName"), sc.get("scriptName"),
                                                  sc.get("lastCompileStatus"), sc.get("errorSummary")))
-    issues = tool("GetStackIssues", {"system": {"refPath": system}}, what=system) or {}
     for i in issues.get("issues", []):
         if i.get("severity") in ("Error", "Warning") and not i.get("bIsDismissed"):
             msg = "%s %s: %s. %s" % (system, i.get("stackDisplayPath"), i.get("shortDescription"),
@@ -969,19 +1026,34 @@ def main():
             list_modules(job["modules"])
         for item in job.get("schema", []):
             dump_schema(item)
-        if os.environ.get("VFX_MODE") == "editor":
-            for system in BUILT + [obj_path(c) for c in job.get("check", [])]:
-                check_system(system)
     except Exception:  # noqa: BLE001
         err(traceback.format_exc())
-    finally:
+
+    def write_result():
         with open(job_path + ".result.json", "w", encoding="utf-8") as f:
             json.dump(REPORT, f, indent=1)
-        if os.environ.get("VFX_MODE") == "editor":
-            # -ExecutePythonScript leaves the editor running; quit once it starts ticking.
-            handle = []
-            handle.append(unreal.register_slate_post_tick_callback(lambda dt: (
-                unreal.unregister_slate_post_tick_callback(handle[0]), unreal.SystemLibrary.quit_editor())))
+
+    if os.environ.get("VFX_MODE") != "editor":
+        write_result()
+        return
+
+    def finish():
+        write_result()
+        unreal.SystemLibrary.quit_editor()      # -ExecutePythonScript leaves the editor running
+
+    try:
+        systems = BUILT + [obj_path(c) for c in job.get("check", [])]
+        global _CHECKER                           # keep a reference alive across ticks
+        _CHECKER = Checker(systems, finish)
+    except Exception:  # noqa: BLE001
+        err(traceback.format_exc())
+        write_result()
+        handle = []
+        handle.append(unreal.register_slate_post_tick_callback(lambda dt: (
+            unreal.unregister_slate_post_tick_callback(handle[0]), unreal.SystemLibrary.quit_editor())))
+
+
+_CHECKER = None
 
 
 main()
