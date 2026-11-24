@@ -1,0 +1,94 @@
+{
+ "textures": [
+  {"src": "tex/smoke_atlas.png", "name": "T_VFX_SmokeAtlas"},
+  {"src": "tex/glow.png", "name": "T_VFX_Glow"},
+  {"src": "tex/spark.png", "name": "T_VFX_Spark"},
+  {"src": "tex/ring.png", "name": "T_VFX_Ring"},
+  {"src": "tex/noise.png", "name": "T_VFX_Noise", "kind": "tile"}
+ ],
+ "materials": {
+  "instances": [
+   {"name": "MI_VFX_Smoke", "master": "sprite_alpha", "params": {"Texture": "/Game/VFX/Textures/T_VFX_SmokeAtlas", "SoftDistance": 60}},
+   {"name": "MI_VFX_Glow", "master": "sprite_add", "params": {"Texture": "/Game/VFX/Textures/T_VFX_Glow", "EmissiveBoost": 4, "SoftParticles": false}},
+   {"name": "MI_VFX_Spark", "master": "sprite_add", "params": {"Texture": "/Game/VFX/Textures/T_VFX_Spark", "EmissiveBoost": 8, "SoftParticles": false}},
+   {"name": "MI_VFX_Ring", "master": "sprite_add", "params": {"Texture": "/Game/VFX/Textures/T_VFX_Ring", "EmissiveBoost": 3}}
+  ]
+ },
+ "systems": [
+  {
+   "system": "/Game/VFX/Systems/NS_Impact",
+   "user": [
+    {"name": "Tint", "type": "color", "value": [1.0, 0.6, 0.2, 1.0]}
+   ],
+   "emitters": [
+    {
+     "name": "Flash",
+     "template": "SimpleSpriteBurst",
+     "renderers": [{"index": 0, "set": {"Material": "/Game/VFX/Materials/MI_VFX_Glow"}}],
+     "modules": [
+      {"set": "SpawnBurst_Instantaneous", "inputs": {"Spawn Count": 1}},
+      {"set": "InitializeParticle", "inputs": {"Lifetime": 0.12, "Color": {"link": "User.Tint"}, "Uniform Sprite Size": 220}},
+      {"add": "/Niagara/Modules/Update/Size/ScaleSpriteSize", "inputs": {
+        "Scale Sprite Size Mode": "Uniform Curve",
+        "Uniform Curve Sprite Scale": {"curve": [[0, 0.3], [0.2, 1.0], [1, 1.4]]}}}
+     ]
+    },
+    {
+     "name": "Ring",
+     "template": "SimpleSpriteBurst",
+     "renderers": [{"index": 0, "set": {"Material": "/Game/VFX/Materials/MI_VFX_Ring"}}],
+     "modules": [
+      {"set": "SpawnBurst_Instantaneous", "inputs": {"Spawn Count": 1}},
+      {"set": "InitializeParticle", "inputs": {"Lifetime": 0.35, "Color": {"link": "User.Tint"}, "Uniform Sprite Size": 120}},
+      {"add": "/Niagara/Modules/Update/Size/ScaleSpriteSize", "inputs": {
+        "Scale Sprite Size Mode": "Uniform Curve",
+        "Uniform Curve Sprite Scale": {"curve": [[0, 0.2], [0.3, 2.2], [1, 3.0]], "interp": "cubic"}}}
+     ]
+    },
+    {
+     "name": "Sparks",
+     "template": "SimpleSpriteBurst",
+     "renderers": [{"index": 0, "set": {"Material": "/Game/VFX/Materials/MI_VFX_Spark", "Alignment": "VelocityAligned"}}],
+     "modules": [
+      {"set": "SpawnBurst_Instantaneous", "inputs": {"Spawn Count": 24}},
+      {"set": "InitializeParticle", "inputs": {
+        "Lifetime Mode": "Random", "Lifetime Min": 0.25, "Lifetime Max": 0.6,
+        "Color": [4.0, 2.0, 0.5, 1.0],
+        "Sprite Size Mode": "Non-Uniform", "Sprite Size": [30, 4]}},
+      {"add": "/Niagara/Modules/Spawn/Velocity/AddVelocity", "stack": "particle_spawn", "inputs": {
+        "Velocity Mode": "From Point", "Velocity Speed": {"range": [300, 900]}}},
+      {"add": "/Niagara/Modules/Update/Forces/GravityForce", "inputs": {"Gravity": [0, 0, -980]}},
+      {"add": "/Niagara/Modules/Update/Forces/Drag", "inputs": {"Drag": 2.0}}
+     ]
+    },
+    {
+     "name": "Smoke",
+     "template": "SimpleSpriteBurst",
+     "renderers": [{"index": 0, "set": {"Material": "/Game/VFX/Materials/MI_VFX_Smoke", "SubImageSize": {"x": 4, "y": 2}}}],
+     "modules": [
+      {"remove": "ScaleColor"},
+      {"set": "SpawnBurst_Instantaneous", "inputs": {"Spawn Count": 8}},
+      {"set": "InitializeParticle", "inputs": {
+        "Lifetime Mode": "Random", "Lifetime Min": 0.8, "Lifetime Max": 1.4,
+        "Sprite Size Mode": "Random Uniform", "Uniform Sprite Size Min": 80, "Uniform Sprite Size Max": 140,
+        "Sprite Rotation Mode": "Random"}},
+      {"add": "/Niagara/Modules/Spawn/Velocity/AddVelocity", "stack": "particle_spawn", "inputs": {
+        "Velocity Mode": "From Point", "Velocity Speed": {"range": [40, 140]}}},
+      {"add": "/Niagara/Modules/Update/SubUV/V2/SubUVAnimation", "inputs": {
+        "SubUV Animation Mode": "Random", "Sprite Renderer": {"renderer": 0}}},
+      {"add": "/Niagara/Modules/Update/Color/Color", "inputs": {
+        "Color": {"color_curve": [[0, [0.9, 0.6, 0.3, 0.0]], [0.1, [0.5, 0.45, 0.4, 0.8]], [1, [0.2, 0.2, 0.2, 0.0]]]}}},
+      {"add": "/Niagara/Modules/Update/Material/DynamicMaterialParameters", "inputs": {
+        "Index 0 Param 1": {"curve": [[0, 0.0], [0.4, 0.1], [1, 1.0]]},
+        "Index 0 Param 2": 1.0}},
+      {"add": "/Niagara/Modules/Update/Size/ScaleSpriteSize", "inputs": {
+        "Scale Sprite Size Mode": "Uniform Curve",
+        "Uniform Curve Sprite Scale": {"curve": [[0, 0.4], [0.15, 1.0], [1, 1.8]], "interp": "cubic"}}},
+      {"add": "/Niagara/Modules/Update/Forces/Drag", "inputs": {"Drag": 1.5}}
+     ]
+    }
+   ]
+  }
+ ],
+ "dump": [{"system": "/Game/VFX/Systems/NS_Impact", "out": "impact_dump.json"}]
+}
