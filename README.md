@@ -5,6 +5,7 @@ A Claude skill for building Unreal Engine VFX the way most game effects are made
 - `SKILL.md`: the skill. Workflow, running jobs, textures, materials, the Niagara recipe format, and what a run does and does not prove.
 - `scripts/vfx_tex.py`: packs PNGs into a SubUV atlas and generates starter shapes (glow, ring, spark, tiling noise). Standard library only, so it runs on Unreal's bundled Python.
 - `scripts/ue_run.sh`: runs a job in a headless editor and prints the result.
+- `scripts/ue_shot.sh`: renders systems offscreen to PNG stills, so the effect can be looked at.
 - `scripts/ue/vfx_job.py`: the Unreal-side runner. Imports textures, generates four master particle materials and their instances, creates or rebuilds Niagara systems, then checks compile state and stack errors.
 - `references/`: the recipe format and engine quirks, effect design notes with starting values, and how to spawn and drive the effects from gameplay code.
 - `examples/impact/job.json`: a four-layer impact effect (flash, ring, sparks, smoke).
@@ -33,7 +34,7 @@ The smoke atlas needs eight same-sized smoke puff PNGs with the shape in alpha; 
 
 ## Status
 
-Tested on UE 5.8 on Windows: the example builds on a new project and passes Niagara's compile and stack-issue checks. The headless editor has no GPU, so a run proves an effect compiles, not how it looks; the starting values need tuning by eye. Epic marks the toolset plugins experimental, so they may change in later engine versions.
+Tested on UE 5.8 on Windows: the example builds on a new project and passes Niagara's compile and stack-issue checks. A job run proves an effect compiles, not how it looks; use `ue_shot.sh` to render stills and tune against them. Epic marks the toolset plugins experimental, so they may change in later engine versions.
 
 ## License
 

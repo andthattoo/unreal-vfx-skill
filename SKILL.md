@@ -73,7 +73,7 @@ bash <skill>/scripts/ue_run.sh "C:/path/Project.uproject" "C:/path/job.json"
 PY="C:/Program Files/Epic Games/UE_5.8/Engine/Binaries/ThirdParty/Python3/Win64/python.exe"
 "$PY" -I scripts/vfx_tex.py info  pack/smoke_01.png              # where is the shape: alpha or RGB?
 "$PY" -I scripts/vfx_tex.py pack  tex/smoke_atlas.png pack/smoke_0[1-8].png --cols 4 --cell 256
-"$PY" -I scripts/vfx_tex.py shape glow tex/glow.png              # also: ring | spark | noise | band
+"$PY" -I scripts/vfx_tex.py shape glow tex/glow.png   # also: ring | spark | noise | band | streaks | blade
 ```
 
 - **The shape must be in alpha** for the sprite materials. Art on a black background has it in
@@ -98,12 +98,16 @@ Prefer a new instance over a new master.
 | `sprite_alpha` | smoke, dust, debris, anything that should darken | `Texture` |
 | `panner_add` / `panner_alpha` | beams, trails, shockwave bands, auras: two scrolling layers times a mask | `Texture`, `Noise`, `Mask` |
 
-Shared scalars: `EmissiveBoost`, `ErodeSoftness`, `SoftDistance`, and the switch `SoftParticles`.
+Shared: scalars `EmissiveBoost`, `ErodeSoftness`, `SoftDistance`, the switch `SoftParticles`, and the
+colour `HotColor`, which is added where the shape is strongest (red particle colour plus a yellow
+`HotColor` gives a red body with yellow cores; black, the default, turns it off).
 Panner extras: `MainTileU/V`, `MainSpeedU/V`, `NoiseTileU/V`, `NoiseSpeedU/V`, `NoiseAmount`,
 `TextureUseAlpha`.
 
 Every master reads particle colour and one dynamic parameter: **x = Erode** (0 to 1 dissolves the
-shape from its thin edges inward) and **y = Boost** (brightness multiplier). Drive them with the
+shape from its thin edges inward) and **y = Boost** (brightness multiplier). The panner masters also
+read **z and w as a UV offset** on the main texture (`Index 0 Param 3` and `4`); a curve on z slides
+the texture along a ribbon as it ages. Drive them with the
 `DynamicMaterialParameters` module: `Index 0 Param 1` is Erode, `Index 0 Param 2` is Boost. If you
 add that module, set Param 2 to 1, because it writes all four values and the default 0 turns
 the particle black.
@@ -161,11 +165,43 @@ Do not rely on remembered Niagara names; they drift between engine versions. Ask
 Proven by `"ok": true`: assets exist and saved, every input was accepted, Niagara reports the
 system compiled, and there are no stack errors.
 
-Not proven: **how it looks**, and material shader errors (the headless editor has no GPU, so
-shaders are not compiled). Say this plainly when you report. Then close the loop one of these
-ways: ask the user to open the system and send a screenshot or describe it; take a screenshot
-yourself if you have a way to see their editor; or, for timing, read the dump and reason about
-the curves. Give tuning as specific number changes, not adjectives.
+Not proven: **how it looks**. A system can compile cleanly and still be dim, thin, the wrong
+colour or invisible; the first sword trail built with this skill passed every check and looked
+like a few faint lines. So look before you report.
+
+## Looking at an effect
+
+```bash
+bash <skill>/scripts/ue_shot.sh "C:/path/Project.uproject" "C:/path/shot.json"
+```
+
+Renders the systems offscreen (no window) with a real GPU and writes PNG stills you can open
+with the Read tool. Config, in full, is at the top of `scripts/ue/vfx_shot.py`:
+
+```json
+{"out_dir": "shots", "camera": {"at": [-520, 0, 150], "fov": 60},
+ "systems": [
+   {"path": "/Game/VFX/Systems/NS_Blaze", "at": [0, -200, 215]},
+   {"path": "/Game/VFX/Systems/NS_Trail", "at": [0, 90, 150],
+    "swing": {"axis": "roll", "from": 70, "to": 310, "start": 8.0, "time": 0.28, "arm": [0, 0, -120]}},
+   {"path": "/Game/VFX/Systems/NS_Impact", "at": [0, 0, 60], "restart_at": 8.0}],
+ "shots": [8.14, 8.24, 8.36, 8.5]}
+```
+
+- Start the action around 8 seconds in. Shaders compile on first use and earlier frames can
+  show nothing.
+- The background is black, which suits additive effects. `"backdrop": true` adds a lit grey
+  floor and wall for smoke and anything alpha-blended.
+- Trails and ribbons only exist while the emitter travels: give them a `swing` with an `arm`
+  so the emitter moves along an arc. Rotating in place draws nothing.
+- One-shot bursts have finished long before the first shot; use `restart_at`.
+- It creates a temporary level at `/Game/VFX/_VfxShotTmp`. Prefer shooting in a scratch project
+  that has the same job applied, so the user's project gains no test level.
+- This shows the effect alone on a test rig, not on the user's character or in their level.
+  Say so, and still ask them how it looks in game.
+
+Iterate against the stills: change numbers, rerun the job, reshoot. Give tuning as specific
+number changes, not adjectives.
 
 ## Mobile and performance
 

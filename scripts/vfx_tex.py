@@ -9,7 +9,7 @@ Commands
         bottom, which is the order Niagara's SubImageIndex counts in. --cell downscales each
         input to PX (integer factors only). --luma-alpha replaces alpha with brightness, for
         art drawn on a black background. Prints the grid to put in the renderer's SubImageSize.
-  shape KIND OUT.png [--size N]       generate a starter texture: glow | ring | spark | noise | band
+  shape KIND OUT.png [--size N]       generate a starter texture: glow | ring | spark | noise | band | streaks | blade
         glow/ring/spark are white with the shape in alpha (sprites). noise is tiling greyscale
         in RGB (import it as kind "tile" and scroll it in a panner material). band is a soft
         line across V in RGB, the Mask for ribbons and beams.
@@ -208,6 +208,18 @@ def _value_noise(x, y, period, seed):
     return a + (b - a) * fx + (c - a) * fy + (a - b - c + d) * fx * fy
 
 
+def _aniso_noise(x, y, px, py, seed):
+    """Tiling value noise with separate periods per axis (px along U, py along V)."""
+    x0, y0 = int(math.floor(x)), int(math.floor(y))
+    fx, fy = x - x0, y - y0
+    fx, fy = fx * fx * (3 - 2 * fx), fy * fy * (3 - 2 * fy)
+    a = _hash(x0 % px, y0 % py, seed)
+    b = _hash((x0 + 1) % px, y0 % py, seed)
+    c = _hash(x0 % px, (y0 + 1) % py, seed)
+    d = _hash((x0 + 1) % px, (y0 + 1) % py, seed)
+    return a + (b - a) * fx + (c - a) * fy + (a - b - c + d) * fx * fy
+
+
 def cmd_shape(args):
     kind, out = args[0], args[1]
     size = int(args[args.index("--size") + 1]) if "--size" in args else 256
@@ -217,6 +229,22 @@ def cmd_shape(args):
             u, v = (x + 0.5) / size * 2 - 1, (y + 0.5) / size * 2 - 1
             r = math.hypot(u, v)
             i = (y * size + x) * 4
+            if kind == "streaks":           # tiling fibres running along U: the body of a trail
+                val, amp = 0.0, 0.5
+                for octave, (fu, fv) in enumerate(((2, 10), (3, 22), (5, 46), (8, 90))):
+                    val += amp * _aniso_noise(x / size * fu, y / size * fv, fu, fv, 11 + octave)
+                    amp *= 0.5
+                val = 0.22 + 0.78 * max(0.0, min(1.0, (val - 0.26) / 0.44))
+                c = int(val * val * (3 - 2 * val) * 255)
+                px[i:i + 4] = bytes((c, c, c, 255))
+                continue
+            if kind == "blade":             # ribbon mask that fills the width: soft edges, hot rims
+                d = abs(v)
+                edge = max(0.0, min(1.0, (1.0 - d) / 0.1))
+                val = edge * (0.75 + 0.25 * d ** 2.5)
+                c = int(val * 255)
+                px[i:i + 4] = bytes((c, c, c, 255))
+                continue
             if kind == "noise":
                 val, amp, freq = 0.0, 0.5, 4
                 for octave in range(5):
@@ -239,7 +267,7 @@ def cmd_shape(args):
             elif kind == "spark":           # horizontal streak: long in U, thin in V, hot centre
                 a = max(0.0, 1 - abs(u)) ** 1.5 * max(0.0, 1 - abs(v) / 0.12) ** 2
             else:
-                raise SystemExit("shape: unknown kind %s (glow | ring | spark | noise | band)" % kind)
+                raise SystemExit("shape: unknown kind %s (glow | ring | spark | noise | band | streaks | blade)" % kind)
             px[i:i + 4] = bytes((255, 255, 255, max(0, min(255, int(a * 255)))))
     write_png(out, size, size, px)
     print("%s  %dx%d  %s" % (out, size, size, kind))

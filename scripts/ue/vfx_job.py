@@ -201,15 +201,20 @@ class Graph:
             err("material %s: could not connect output %s" % (self.m.get_name(), prop))
 
 
-def _erode_and_finish(g, value, value_out, rgb, additive):
+def _dynamic(g):
+    """Per-particle controls: x Erode, y Boost, z and w UV offset (panner masters only)."""
+    return g.node(unreal.MaterialExpressionDynamicParameter,
+                  param_names=["Erode", "Boost", "OffsetU", "OffsetV"],
+                  default_value=unreal.LinearColor(0.0, 1.0, 0.0, 0.0))
+
+
+def _erode_and_finish(g, value, value_out, rgb, additive, dyn=None):
     """Shared tail of both masters: erosion, particle alpha, soft particles, outputs.
 
     value: node whose output `value_out` is the 0..1 shape (texture alpha or mask).
     rgb:   node carrying the tinted colour.
     """
-    dyn = g.node(unreal.MaterialExpressionDynamicParameter,
-                 param_names=["Erode", "Boost", "Spare1", "Spare2"],
-                 default_value=unreal.LinearColor(0.0, 1.0, 0.0, 0.0))
+    dyn = dyn or _dynamic(g)
     pc = g.node(unreal.MaterialExpressionParticleColor)
     soft = g.scalar("ErodeSoftness", 0.2)
     # alpha = value * saturate((value - Erode) / Softness) * particle alpha
@@ -233,6 +238,14 @@ def _erode_and_finish(g, value, value_out, rgb, additive):
     g.link(alpha, "", sw, "False")
     # colour = rgb * particle colour * EmissiveBoost * per-particle Boost
     col = g.mul(rgb, pc, "", "")
+    # HotColor is added where the shape is strongest, so bright cores can run to a second colour
+    # (red body, yellow core) while thin edges keep the particle colour. Black turns it off.
+    hot = g.node(unreal.MaterialExpressionVectorParameter, parameter_name="HotColor",
+                 default_value=unreal.LinearColor(0.0, 0.0, 0.0, 0.0), group="VFX")
+    strength = g.mul(value, value, value_out, value_out)
+    hot_term = g.mul(hot, strength, "", "")
+    hot_term = g.mul(hot_term, pc, "", "A")
+    col = g.op(unreal.MaterialExpressionAdd, col, hot_term)
     col = g.mul(col, g.scalar("EmissiveBoost", 1.0), "", "")
     col = g.mul(col, dyn, "", "G")      # Boost = dynamic parameter index 0, y
     if additive:
@@ -250,7 +263,9 @@ def _build_sprite(g, additive):
 
 
 def _build_panner(g, additive):
-    def layer(prefix, tex_param, tile, speed):
+    dyn = _dynamic(g)
+
+    def layer(prefix, tex_param, tile, speed, offset=False):
         uv = g.node(unreal.MaterialExpressionTextureCoordinate)
         tiling = g.node(unreal.MaterialExpressionAppendVector)
         g.link(g.scalar(prefix + "TileU", tile[0]), "", tiling, "A")
@@ -262,11 +277,16 @@ def _build_panner(g, additive):
         pan = g.node(unreal.MaterialExpressionPanner)
         g.link(scaled, "", pan, "Coordinate")
         g.link(spd, "", pan, "Speed")
+        if offset:      # per-particle UV offset: slides the texture along a ribbon as it ages
+            shift = g.node(unreal.MaterialExpressionAppendVector)
+            g.link(dyn, "B", shift, "A")
+            g.link(dyn, "A", shift, "B")
+            pan = g.op(unreal.MaterialExpressionAdd, pan, shift)
         t = g.node(unreal.MaterialExpressionTextureSampleParameter2D, parameter_name=tex_param, group="VFX")
         g.link(pan, "", t, "UVs")
         return t
 
-    main = layer("Main", "Texture", (1.0, 1.0), (0.0, -0.5))
+    main = layer("Main", "Texture", (1.0, 1.0), (0.0, -0.5), offset=True)
     noise = layer("Noise", "Noise", (2.0, 1.0), (0.1, -0.9))
     mask = g.node(unreal.MaterialExpressionTextureSampleParameter2D, parameter_name="Mask", group="VFX")
     white = unreal.load_asset("/Engine/EngineResources/WhiteSquareTexture")
@@ -290,7 +310,7 @@ def _build_panner(g, additive):
     value = g.mul(value, mask, "", "R")
     value = _saturate(g, value)
     white_rgb = g.node(unreal.MaterialExpressionConstant3Vector, constant=unreal.LinearColor(1, 1, 1, 1))
-    _erode_and_finish(g, value, "", white_rgb, additive)
+    _erode_and_finish(g, value, "", white_rgb, additive, dyn)
 
 
 def _saturate(g, node):
@@ -613,6 +633,9 @@ class Stack:
                 else:
                     props = {ch: curve_keys([(p[0], p[1][i]) for p in pts], interp)
                              for i, ch in enumerate(channels)}
+                # Evaluate the keys directly. The baked lookup table is not rebuilt when keys are
+                # set through the tool, so with bUseLUT on the particle keeps reading the old curve.
+                props["bUseLUT"] = False
                 if "DataInterface" in type_ref:
                     # Some modules (ScaleSpriteSize, ScaleColor curve modes) take the curve directly.
                     self.send(script, module, names, inst(E + "DataInterface", {"propertyValues": json.dumps(props)}))
@@ -953,9 +976,20 @@ def dump_system(item):
         r = ref(system, n)
         topo = tool("GetEmitterTopology", {"emitterRef": r}, what=n) or {}
         em = {"stacks": {}, "values": tool("GetEmitterInputValues", {"emitterRef": r}, what=n), "renderers": []}
+        script_of = {}
         for key in ("emitterSpawnScript", "emitterUpdateScript", "particleSpawnScript", "particleUpdateScript"):
             sc = topo.get(key) or {}
             em["stacks"][sc.get("scriptName", key)] = [m["moduleName"] for m in sc.get("modules", [])]
+            for m in sc.get("modules", []):
+                script_of[m["moduleName"]] = sc.get("scriptName")
+        # Values only say "this is a dynamic input"; attach what is inside (curve keys, ranges).
+        for mod in em["values"] or []:
+            for key in [k for k in mod if k != "moduleName"]:
+                for entry in mod[key]:
+                    if entry["value"]["struct"]["refPath"].endswith("_DynamicInput"):
+                        entry["chain"] = tool("GetDynamicInputChain", {"stackInputRef": ref(
+                            system, n, script_of.get(mod["moduleName"], ""), mod["moduleName"],
+                            inputs=[entry["name"]])}, what=entry["name"])
         for rd in topo.get("renderers", []):
             data = tool("GetRendererData", {"rendererRef": ref(system, n, renderer=rd["rendererIndex"])}, what=n) or {}
             pv = data.get("propertyValues")

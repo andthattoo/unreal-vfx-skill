@@ -217,6 +217,13 @@ rebuilding it. Systems built in the same job are checked automatically.
   `MaterialEditingLibrary` return `False` even when they succeed.
 - Removed emitters linger in memory for the session as `<System>:<Emitter>_<n>`; anything that
   resolves objects by path must take the highest `<n>`.
+- Curve keys set through the tool do not rebuild the curve's baked lookup table, so with
+  `bUseLUT` on, particles keep reading the old curve (colours and fades silently wrong). The
+  wrapper writes `bUseLUT: false` with every curve.
+- `-ExecutePythonScript` makes the editor exit a few frames after the script returns. Jobs fit in
+  that window; anything that must tick for seconds (`ue_shot.sh`) uses `-ExecCmds="py <file>"`.
+- Native enums such as `ENiagaraCoordinateSpace` take display names like any other mode input
+  (`"Local"`, `"World"`, `"Simulation"`).
 - Lightweight (stateless) emitters and Niagara Data Channels are not supported by the toolset.
   Avoid the `*Lightweight` system templates.
 - The editor may be localised, in which case tool descriptions and enum display names come back
