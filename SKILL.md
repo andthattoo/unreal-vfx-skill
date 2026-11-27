@@ -211,6 +211,12 @@ bigger particle to many small ones, set `"SoftParticles": false` on instances (d
 a scene depth read), avoid light renderers, and keep translucent layers few and small on screen
 because overdraw is the budget. `references/effect-recipes.md` has budgets.
 
+## Effects on melee attacks
+
+When the effect sits on an attack and the user turns to how the attack itself behaves (combo
+timing, attack chaining, clicks feeling insensitive, movement cancelling attacks), that is a
+separate skill: use `unreal-melee-combat` if it is installed.
+
 ## Reference files
 
 - `references/niagara-scripting.md`: recipe format, value shorthands, module placement, known
